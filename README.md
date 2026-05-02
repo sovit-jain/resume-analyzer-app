@@ -1,1 +1,1 @@
-# finance-bot
+# resume-analyzer-app
