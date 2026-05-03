@@ -1,10 +1,3 @@
-# Resume Analyzer dependencies
-# Install with: pip install -r requirements.txt
-
-# Frontend
-streamlit>=1.39,<2.0
-requests>=2.31,<3.0
-
 # Backend API
 fastapi>=0.115,<1.0
 uvicorn>=0.30,<1.0
