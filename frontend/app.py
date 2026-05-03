@@ -4,10 +4,10 @@ import os
 import requests
 import streamlit as st
 
-BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000/analyze-resume")
+BACKEND_URL = os.getenv("BACKEND_URL", "https://backend-service-812074477410.asia-south1.run.app/analyze-resume")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-RANK_URL = os.getenv("RANK_URL", "http://127.0.0.1:8000/rank-resumes")
-INDEX_URL = os.getenv("INDEX_URL", "http://127.0.0.1:8000/index-resumes")
+RANK_URL = os.getenv("RANK_URL", "https://backend-service-812074477410.asia-south1.run.app/rank-resumes")
+INDEX_URL = os.getenv("INDEX_URL", "https://backend-service-812074477410.asia-south1.run.app/index-resumes")
 
 if not logging.getLogger().handlers:
     logging.basicConfig(
