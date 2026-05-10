@@ -9,6 +9,7 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 RANK_URL = os.getenv("RANK_URL", "https://backend-service-812074477410.asia-south1.run.app/rank-resumes")
 INDEX_URL = os.getenv("INDEX_URL", "https://backend-service-812074477410.asia-south1.run.app/index-resumes")
 
+
 if not logging.getLogger().handlers:
     logging.basicConfig(
         level=getattr(logging, LOG_LEVEL, logging.INFO),
