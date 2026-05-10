@@ -34,7 +34,7 @@ jobs:
 
     - name: Build Frontend Image
       run: |
-        docker build -t asia-south1-docker.pkg.dev/$PROJECT_ID/$REPO/frontend-service ./frontend
+        docker build -t asia-south1-docker.pkg.dev/$PROJECT_ID/$REPO/frontend-service:latest ./frontend
 
     - name: Push Image
       run: |
