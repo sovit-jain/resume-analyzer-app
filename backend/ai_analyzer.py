@@ -15,7 +15,6 @@ logger = get_logger(__name__)
 # LCEL CHAIN DEFINITION
 # ============================================================================
 
-
 def get_analysis_chain():
     """Creates and returns the LCEL chain for resume analysis"""
     llm = ChatOpenAI(
