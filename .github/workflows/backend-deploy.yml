@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - main
+      - feature/resume-analyzer
+    paths:
+      - 'backend/**'
+
+  workflow_dispatch:
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
