@@ -1,0 +1,29 @@
+name: Frontend Scale Up
+
+on:
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: asia-south1
+  SERVICE: frontend-service
+
+jobs:
+  scale-up:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Scale Up Frontend
+        run: |
+          gcloud run services update $SERVICE \
+            --region=$REGION \
+            --min-instances=1 \
+            --max-instances=5
