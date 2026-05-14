@@ -9,6 +9,7 @@ from langchain_openai import OpenAIEmbeddings
 from langchain_community.vectorstores import Chroma
 
 from config import get_logger, OPENAI_API_KEY
+from typing import Optional
 
 logger = get_logger(__name__)
 
@@ -450,3 +451,165 @@ def index_resumes(
         collection_name=collection_name,
         persist_directory=persist_directory
     )
+
+
+# =========================================================
+# VECTOR STORE UTILITIES
+# =========================================================
+def retrieve_relevant_chunks(vector_store, query: str, k: int = 5) -> list[str]:
+    """
+    Retrieve the top-k most relevant chunks from the given vector store for `query`.
+    Returns a list of chunk text strings.
+    """
+    try:
+        docs = vector_store.similarity_search(query, k=k)
+    except Exception:
+        try:
+            docs_with_score = vector_store.similarity_search_with_score(query, k=k)
+            docs = [d for d, _ in docs_with_score]
+        except Exception:
+            logger.exception("Failed to run similarity search on vector store")
+            return []
+
+    results = []
+    for d in docs or []:
+        try:
+            results.append(d.page_content)
+        except Exception:
+            results.append(str(d))
+
+    return results
+
+
+def inspect_vector_store(vector_store) -> dict:
+    """Return a small inspection dict for debugging/logging purposes."""
+    info = {"type": type(vector_store).__name__}
+    try:
+        if hasattr(vector_store, "_collection"):
+            coll = getattr(vector_store, "_collection")
+            try:
+                info["doc_count"] = coll.count()
+            except Exception:
+                info["doc_count"] = getattr(coll, "get_count", lambda: None)()
+        elif hasattr(vector_store, "persist_directory"):
+            info["persist_directory"] = getattr(vector_store, "persist_directory")
+    except Exception:
+        logger.exception("inspect_vector_store failed")
+    return info
+
+
+# =========================================================
+# LOAD & RANK UTILITIES
+# =========================================================
+def load_vector_store(collection_name: str = "resume_chunks", persist_directory: Optional[str] = None):
+    """Load an existing Chroma vector store. Returns the vector store instance."""
+    try:
+        if persist_directory:
+            return Chroma(collection_name=collection_name, persist_directory=persist_directory)
+        return Chroma(collection_name=collection_name)
+    except Exception:
+        try:
+            return Chroma(persist_directory=persist_directory, collection_name=collection_name)
+        except Exception:
+            logger.exception("Failed to load vector store for collection=%s persist=%s", collection_name, persist_directory)
+            raise
+
+
+def retrieve_relevant_resumes(
+    vector_store,
+    query: str,
+    top_n: int = 10,
+    min_years: Optional[int] = None,
+    location_contains: Optional[str] = None,
+    role_contains: Optional[str] = None,
+    semantic_weight: float = 0.7,
+    years_weight: float = 0.2,
+    role_weight: float = 0.05,
+    location_weight: float = 0.05,
+):
+    """
+    Rank resumes from an indexed vector store for a given query.
+
+    Returns a list of dicts with keys: resume_id, filename, score, top_snippets, resume_metadata
+    """
+    try:
+        try:
+            results = vector_store.similarity_search_with_score(query, k=top_n * 5)
+        except Exception:
+            docs = vector_store.similarity_search(query, k=top_n * 5)
+            results = [(d, None) for d in docs]
+
+        agg = {}
+        for doc, score in results or []:
+            meta = getattr(doc, "metadata", {}) or {}
+            resume_id = str(meta.get("resume_id", ""))
+            filename = meta.get("filename") or meta.get("file") or ""
+            if not resume_id:
+                continue
+            entry = agg.setdefault(resume_id, {
+                "resume_id": resume_id,
+                "filename": filename,
+                "resume_metadata": meta,
+                "semantic_raw": 0.0,
+                "hits": 0,
+                "snippets": [],
+            })
+            if score is None:
+                entry["semantic_raw"] += 1.0
+            else:
+                try:
+                    entry["semantic_raw"] += 1.0 / (1.0 + abs(float(score)))
+                except Exception:
+                    entry["semantic_raw"] += 1.0
+            entry["hits"] += 1
+            text = getattr(doc, "page_content", str(doc))
+            if text not in entry["snippets"]:
+                entry["snippets"].append(text)
+
+        items = []
+        max_sem = max((v["semantic_raw"] for v in agg.values()), default=0.0)
+        for rid, v in agg.items():
+            meta = v.get("resume_metadata") or {}
+            if min_years is not None:
+                try:
+                    years = int(meta.get("years_experience") or 0)
+                except Exception:
+                    years = 0
+                if years < min_years:
+                    continue
+            if location_contains:
+                loc = (meta.get("location") or "")
+                if location_contains.lower() not in loc.lower():
+                    continue
+            if role_contains:
+                title = (meta.get("current_title") or "")
+                if role_contains.lower() not in title.lower() and role_contains.lower() not in (v.get("filename") or "").lower():
+                    continue
+            sem = (v["semantic_raw"] / max_sem) if max_sem > 0 else 0.0
+            try:
+                years_val = float(meta.get("years_experience") or 0.0)
+            except Exception:
+                years_val = 0.0
+            years_score = min(years_val / 10.0, 1.0)
+            role_score = 1.0 if role_contains and role_contains.lower() in (meta.get("current_title") or "").lower() else 0.0
+            location_score = 1.0 if location_contains and location_contains.lower() in (meta.get("location") or "").lower() else 0.0
+            final_score = (
+                semantic_weight * sem
+                + years_weight * years_score
+                + role_weight * role_score
+                + location_weight * location_score
+            )
+            items.append({
+                "resume_id": rid,
+                "filename": v.get("filename"),
+                "score": float(final_score),
+                "top_snippets": [{"text": s, "metadata": v.get("resume_metadata")} for s in v.get("snippets")[:3]],
+                "resume_metadata": v.get("resume_metadata"),
+            })
+
+        items.sort(key=lambda x: x.get("score", 0.0), reverse=True)
+        return items[:top_n]
+
+    except Exception:
+        logger.exception("retrieve_relevant_resumes failed")
+        return []
