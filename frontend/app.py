@@ -3,6 +3,9 @@ import os
 
 import requests
 import streamlit as st
+import time
+import hashlib
+import json
 
 BACKEND_URL = os.getenv("BACKEND_URL", "https://backend-service-812074477410.asia-south1.run.app/analyze-resume")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -189,13 +192,15 @@ with right_col:
                 logger.info("log-5 frontend.py | Sending rank request to %s", RANK_URL)
                 with st.spinner("Ranking resumes from persisted index..."):
                     try:
+                        start_t = time.time()
                         response = requests.post(
                             RANK_URL,
                             data={
                                 "job_description": job_description,
                                 "collection_name": collection_name,
                                 "persist_directory": persist_directory,
-                                "top_n": 20,
+                                # reduce default result size for faster responses
+                                "top_n": 5,
                                 "min_years": int(min_years_filter),
                                 "location_contains": location_filter,
                                 "role_contains": role_filter,
@@ -209,9 +214,11 @@ with right_col:
                         response.raise_for_status()
                         payload = response.json()
                         ranked = payload.get("ranked_results") or payload.get("ranked")
+                        elapsed = time.time() - start_t
                         st.session_state["result"] = {"ranked_results": ranked}
                         st.session_state["request_status"] = "Completed"
                         st.success("Ranking completed successfully.")
+                        st.caption(f"Request time: {elapsed:.2f}s | Returned {len(ranked or [])} candidates")
                     except requests.RequestException as exc:
                         st.session_state["result"] = None
                         st.session_state["request_status"] = "Backend request failed"
@@ -506,35 +513,74 @@ if result:
         filtered = [r for r in ranked if matches_filters(r)]
 
         st.markdown(f"**Showing {len(filtered)} of {len(ranked)} candidates**")
-        for r in filtered:
-            st.markdown(f"### {r.get('filename')} — Score: {round(r.get('score',0), 3)}")
-            meta = r.get("resume_metadata") or {}
-            info = []
-            if meta.get("current_title"):
-                info.append(f"Title: {meta.get('current_title')}")
-            if meta.get("years_experience") is not None:
-                info.append(f"Years: {meta.get('years_experience')}")
-            if meta.get("location"):
-                info.append(f"Location: {meta.get('location')}")
-            if meta.get("email"):
-                info.append(f"Email: {meta.get('email')}")
-            if info:
-                st.write(" • ".join(info))
-            snippets = r.get("top_snippets", [])
-            if snippets:
-                st.markdown("**Top snippets:**")
-                for s in snippets:
-                    if isinstance(s, dict):
-                        st.write(s.get("text"))
-                    else:
-                        st.write(s)
-            if r.get("analysis"):
-                st.markdown("**Detailed analysis (top candidate):**")
-                a = r.get("analysis")
-                st.write(f"ATS Score: {a.get('ats_score')}")
-                st.write("Strengths:")
-                for s in a.get("strengths", []):
-                    st.write(f"- {s}")
+
+        # Pagination state
+        if "page" not in st.session_state:
+            st.session_state["page"] = 0
+        if "page_size" not in st.session_state:
+            st.session_state["page_size"] = 5
+
+        colp1, colp2, colp3 = st.columns([1, 1, 2])
+        with colp1:
+            if st.button("Previous") and st.session_state["page"] > 0:
+                st.session_state["page"] -= 1
+        with colp2:
+            if st.button("Next"):
+                max_page = max(0, (len(filtered) - 1) // st.session_state["page_size"])
+                if st.session_state["page"] < max_page:
+                    st.session_state["page"] += 1
+        with colp3:
+            st.session_state["page_size"] = st.selectbox("Results per page", [3, 5, 10], index=1)
+
+        start_idx = st.session_state["page"] * st.session_state["page_size"]
+        end_idx = start_idx + st.session_state["page_size"]
+        page_items = filtered[start_idx:end_idx]
+
+        for r in page_items:
+            # Compact summary card
+            with st.container():
+                c1, c2 = st.columns([3, 1])
+                with c1:
+                    st.markdown(f"**{r.get('filename')}**")
+                    meta = r.get("resume_metadata") or {}
+                    subtitle = []
+                    if meta.get("current_title"):
+                        subtitle.append(meta.get("current_title"))
+                    if meta.get("years_experience") is not None:
+                        subtitle.append(f"{meta.get('years_experience')} yrs")
+                    if meta.get("location"):
+                        subtitle.append(meta.get("location"))
+                    if subtitle:
+                        st.caption(" • ".join(subtitle))
+                with c2:
+                    st.metric("Score", f"{round(r.get('score',0),3)}")
+
+                # Details expander
+                with st.expander("View details"):
+                    # Top snippets
+                    snippets = r.get("top_snippets", [])
+                    if snippets:
+                        st.markdown("**Top snippets:**")
+                        for idx, s in enumerate(snippets, start=1):
+                            text = s["text"] if isinstance(s, dict) else (s or "")
+                            if len(text) > 400:
+                                st.write(text[:400].rsplit(" ", 1)[0] + "...")
+                                if st.button(f"Show full snippet {idx} for {r.get('resume_id')}"):
+                                    st.write(text)
+                            else:
+                                st.write(text)
+
+                    # Detailed analysis (if present)
+                    if r.get("analysis"):
+                        st.markdown("**Detailed analysis:**")
+                        a = r.get("analysis")
+                        st.write(f"ATS Score: {a.get('ats_score')}")
+                        st.write("Strengths:")
+                        for s in a.get("strengths", []):
+                            st.write(f"- {s}")
+                        st.write("Suggestions:")
+                        for s in a.get("suggestions", []):
+                            st.write(f"- {s}")
             st.divider()
         st.stop()
 
