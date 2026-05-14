@@ -232,7 +232,8 @@ def analyze_resume(resume_text: str, job_description: str) -> dict:
     try:
         logger.info("log-24 ai_analyzer.py | Starting LCEL chain analysis.")
         
-        # Split resume text into chunks
+        # Keep original resume text as fallback and split into chunks
+        original_resume = resume_text
         resume_chunks = split_text(resume_text)
         
         # Create vector store (in-memory for now, can add persist_directory later)
@@ -245,11 +246,18 @@ def analyze_resume(resume_text: str, job_description: str) -> dict:
         # Retrieve relevant chunks based on job description
         relevant_chunks = retrieve_relevant_chunks(vector_store, job_description, k=5)
         
-        # Use retrieved chunks in the prompt
-        resume_text = "\n\n---\n\n".join(
-            f"[Relevant Chunk {i + 1}]\n{chunk}"
-            for i, chunk in enumerate(relevant_chunks)
-        )
+        # Use retrieved chunks in the prompt. If none found, fall back to the original resume text.
+        if relevant_chunks:
+            resume_text = "\n\n---\n\n".join(
+                f"[Relevant Chunk {i + 1}]\n{chunk}"
+                for i, chunk in enumerate(relevant_chunks)
+            )
+            # Append a brief excerpt of the full resume for context (keeps prompts informative)
+            excerpt = (original_resume[:2000] + "...") if len(original_resume) > 2000 else original_resume
+            resume_text = resume_text + "\n\n---\n\nFull Resume Excerpt:\n" + excerpt
+        else:
+            logger.info("log-24.5 ai_analyzer.py | No relevant chunks found; using full resume fallback in prompt")
+            resume_text = original_resume
         
         # Truncate inputs if too long to avoid token limits (rough estimate: ~4 chars per token)
         max_chars = 100000  # ~25k tokens, well under gpt-4o-mini limit
@@ -267,6 +275,43 @@ def analyze_resume(resume_text: str, job_description: str) -> dict:
             "resume_text": resume_text,
             "job_description": job_description
         })
+
+        # Verify LLM-returned `strengths` against resume content to avoid hallucinated skills
+        try:
+            strengths_raw = result.get("strengths", []) or []
+            # extract resume keywords from the full original resume for reliable matching
+            resume_keywords = _extract_keywords(original_resume)
+            verified = []
+            for s in strengths_raw:
+                s_norm = _normalize_text(s)
+                if any(k in s_norm for k in resume_keywords):
+                    verified.append(s)
+
+            if verified:
+                result["strengths"] = verified
+            else:
+                # If no strengths could be verified, derive strengths from resume keywords instead
+                logger.info("log-24.6 ai_analyzer.py | No LLM strengths verified against resume; deriving strengths from resume keywords")
+                try:
+                    # build frequency map of normalized tokens from resume
+                    normalized = _normalize_text(original_resume)
+                    words = re.findall(r"[A-Za-z][A-Za-z0-9\+\#\.\-/]*", normalized)
+                    freqs: dict[str, int] = {}
+                    for w in words:
+                        if w in STOP_WORDS:
+                            continue
+                        freqs[w] = freqs.get(w, 0) + 1
+
+                    # pick top tokens as fallback strengths
+                    top_tokens = sorted(freqs.items(), key=lambda x: x[1], reverse=True)[:6]
+                    fallback_strengths = [t[0].replace("-", " ") for t in (top_tokens or [])]
+                    # Format reasonably: capitalize tech names where appropriate
+                    result["strengths"] = [s for s in fallback_strengths] or ["Resume keywords extracted"]
+                except Exception:
+                    logger.exception("log-24.8 ai_analyzer.py | Failed to derive fallback strengths from resume")
+                    result["strengths"] = ["Resume text was extracted successfully."]
+        except Exception:
+            logger.exception("log-24.7 ai_analyzer.py | Failed to verify LLM strengths against resume text")
         
         # Normalize result to match AnalysisResponse schema
         normalized = {

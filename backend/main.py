@@ -68,19 +68,30 @@ async def analyze_resume_api(
         # For top candidates, optionally compute detailed analysis (top 3)
         top_to_analyze = min(3, len(ranked))
         ranked_results = []
+
+        # Build a mapping from resume_id -> loaded resume for deterministic lookup
+        loaded_map = {r.get("resume_id"): r for r in loaded}
+
         for idx, item in enumerate(ranked):
-            # find full text for this resume_id
-            full = next((r for r in loaded if r["resume_id"] == item["resume_id" or ""]), None)
+            rid = item.get("resume_id")
+            full = loaded_map.get(rid)
+            if full is None:
+                logger.warning("log-17.1 main.py | Could not find full text for resume_id=%s; skipping detailed analysis", rid)
+
             analysis = None
             if idx < top_to_analyze and full:
                 try:
+                    logger.info("log-17.2 main.py | Running detailed analysis for resume_id=%s filename=%s", rid, full.get("filename"))
                     analysis = analyze_resume(full["text"], job_description)
-                except Exception:
+                    logger.info("log-17.3 main.py | Analysis for resume_id=%s completed | ats_score=%s strengths=%d", rid, analysis.get("ats_score"), len(analysis.get("strengths", [])))
+                except Exception as e:
+                    logger.exception("log-17.4 main.py | Detailed analysis failed for resume_id=%s: %s", rid, str(e))
                     analysis = None
+
             ranked_results.append({
-                "resume_id": item["resume_id"],
+                "resume_id": rid,
                 "filename": item.get("filename"),
-                "score": item.get("score"),
+                "score": float(item.get("score") or 0.0),
                 "top_snippets": item.get("top_snippets", []),
                 "analysis": analysis,
             })

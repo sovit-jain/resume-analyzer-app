@@ -526,6 +526,7 @@ def retrieve_relevant_resumes(
     years_weight: float = 0.2,
     role_weight: float = 0.05,
     location_weight: float = 0.05,
+    semantic_threshold: float = 0.0,
 ):
     """
     Rank resumes from an indexed vector store for a given query.
@@ -539,6 +540,7 @@ def retrieve_relevant_resumes(
             docs = vector_store.similarity_search(query, k=top_n * 5)
             results = [(d, None) for d in docs]
 
+        # Aggregate per-resume but keep raw similarity values to allow different aggregation strategies
         agg = {}
         for doc, score in results or []:
             meta = getattr(doc, "metadata", {}) or {}
@@ -550,25 +552,50 @@ def retrieve_relevant_resumes(
                 "resume_id": resume_id,
                 "filename": filename,
                 "resume_metadata": meta,
-                "semantic_raw": 0.0,
+                "sim_values": [],
                 "hits": 0,
                 "snippets": [],
             })
+
+            # Convert distance-like scores to similarity in (0,1], fallback for None
             if score is None:
-                entry["semantic_raw"] += 1.0
+                entry["sim_values"].append(None)
             else:
                 try:
-                    entry["semantic_raw"] += 1.0 / (1.0 + abs(float(score)))
+                    val = float(score)
+                    sim = 1.0 / (1.0 + abs(val))
+                    entry["sim_values"].append(sim)
                 except Exception:
-                    entry["semantic_raw"] += 1.0
+                    entry["sim_values"].append(None)
+
             entry["hits"] += 1
             text = getattr(doc, "page_content", str(doc))
             if text not in entry["snippets"]:
                 entry["snippets"].append(text)
 
+        # Compute per-resume semantic signal using max(similarity) to avoid bias toward long resumes
         items = []
-        max_sem = max((v["semantic_raw"] for v in agg.values()), default=0.0)
+        per_resume_sim = {}
         for rid, v in agg.items():
+            sims = [s for s in v.get("sim_values", []) if s is not None]
+            if sims:
+                best_sim = max(sims)
+            else:
+                # if no numeric similarities available, fall back to normalized hit-count heuristic
+                best_sim = min(1.0, v.get("hits", 0) / 5.0) if v.get("hits", 0) > 0 else 0.0
+            per_resume_sim[rid] = best_sim
+
+        max_sim_across = max(per_resume_sim.values()) if per_resume_sim else 0.0
+
+        for rid, v in agg.items():
+            meta = v.get("resume_metadata") or {}
+            # normalize semantic score
+            raw_sim = per_resume_sim.get(rid, 0.0)
+            sem = (raw_sim / max_sim_across) if max_sim_across > 0 else 0.0
+
+            # Apply semantic threshold filtering early
+            if sem < semantic_threshold:
+                continue
             meta = v.get("resume_metadata") or {}
             if min_years is not None:
                 try:
@@ -585,7 +612,7 @@ def retrieve_relevant_resumes(
                 title = (meta.get("current_title") or "")
                 if role_contains.lower() not in title.lower() and role_contains.lower() not in (v.get("filename") or "").lower():
                     continue
-            sem = (v["semantic_raw"] / max_sem) if max_sem > 0 else 0.0
+            # sem is already computed above
             try:
                 years_val = float(meta.get("years_experience") or 0.0)
             except Exception:
