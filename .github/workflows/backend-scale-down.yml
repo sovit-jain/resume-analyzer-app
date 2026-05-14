@@ -1,0 +1,29 @@
+name: Backend Scale Down
+
+on:
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: asia-south1
+  SERVICE: backend-service
+
+jobs:
+  scale-down:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Scale Down Backend
+        run: |
+          gcloud run services update $SERVICE \
+            --region=$REGION \
+            --min-instances=0 \
+            --max-instances=1
