@@ -134,7 +134,8 @@ with left_col:
         # Allow indexing uploaded resumes into a persisted collection from the UI
         index_clicked = None
         if not use_index:
-            index_clicked = st.form_submit_button("Index & Persist resumes", key="index_button")
+                # `key` arg removed for compatibility with older Streamlit versions
+                index_clicked = st.form_submit_button("Index & Persist resumes")
 
 with right_col:
     st.markdown("### What you will get")
