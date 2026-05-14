@@ -322,6 +322,10 @@ with right_col:
                     with st.spinner("Analyzing resume..."):
                         logger.info("log-5.5 frontend.py | About to send POST request to %s", BACKEND_URL)
                         try:
+                            # Clear previous result and cache to ensure fresh response
+                            st.session_state.pop("result", None)
+                            st.session_state.pop("cache", None)
+
                             response = requests.post(
                                 BACKEND_URL,
                                 files=files_payload,
@@ -333,8 +337,16 @@ with right_col:
                             # Backend may return either single analysis or ranked results for multiple resumes
                             analysis = payload.get("analysis") or payload.get("result")
                             ranked = payload.get("ranked_results") or payload.get("ranked")
+                            # Reset UI paging and set result
+                            st.session_state["page"] = 0
                             if ranked:
                                 st.session_state["result"] = {"ranked_results": ranked}
+                                # Quick debug caption: show returned resume_id and score pairs
+                                try:
+                                    pairs = [f"{r.get('resume_id')}:{round(r.get('score',0),3)}" for r in (ranked or [])]
+                                    st.caption("Backend ranked results: " + ", ".join(pairs))
+                                except Exception:
+                                    pass
                             else:
                                 st.session_state["result"] = analysis
                             st.session_state["request_status"] = "Completed"
