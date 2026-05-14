@@ -13,7 +13,6 @@ from config import get_logger, OPENAI_API_KEY
 logger = get_logger(__name__)
 
 
-
 # =========================================================
 # IMPORTANT FIX
 # ChromaDB does not allow None metadata values
