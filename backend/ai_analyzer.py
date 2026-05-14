@@ -1,5 +1,6 @@
 import json
 import re
+import uuid
 
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
@@ -236,8 +237,9 @@ def analyze_resume(resume_text: str, job_description: str) -> dict:
         original_resume = resume_text
         resume_chunks = split_text(resume_text)
         
-        # Create vector store (in-memory for now, can add persist_directory later)
-        vector_store = create_vector_store(resume_chunks)
+        # Create a unique temporary vector store for this resume to avoid cross-request contamination
+        tmp_collection = f"temp_analysis_{uuid.uuid4()}"
+        vector_store = create_vector_store(resume_chunks, collection_name=tmp_collection, persist_directory=None)
         
         # Optional: Inspect vector store contents for debugging
         store_info = inspect_vector_store(vector_store)
